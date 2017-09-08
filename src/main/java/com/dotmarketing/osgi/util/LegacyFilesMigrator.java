@@ -230,15 +230,14 @@ public class LegacyFilesMigrator {
 		final Identifier legacyIdentifier = identifierAPI.find(file);
 		final VersionInfo versionInfo = versionableAPI.getVersionInfo(legacyIdentifier.getId());
 		List<Versionable> legacyFileVersions = findAllVersions(file);
-		final File working = (File) versionableAPI.findWorkingVersion(legacyIdentifier, sysUser,
-				!RESPECT_ANON_PERMISSIONS);
 		final java.io.File fileReferenceInFS = fileAPI.getAssetIOFile(file);
 		if (null == fileReferenceInFS || !fileReferenceInFS.exists()) {
 			Logger.warn(this,
 					"\nLegacy File '" + legacyIdentifier.getPath() + "' has no associated binary file. Deleting...");
 			deleteLegacyFile(file);
-			fileAPI.delete(working, sysUser, !RESPECT_FRONTEND_ROLES);
 		} else {
+			final File working = (File) versionableAPI.findWorkingVersion(legacyIdentifier, sysUser,
+					!RESPECT_ANON_PERMISSIONS);
 			final Contentlet cworking = migrateLegacyFileData(file);
 			Contentlet clive = null;
 			setHostFolderValues(cworking, legacyIdentifier);
@@ -429,8 +428,11 @@ public class LegacyFilesMigrator {
 	 *             An error occurred when deleting the data.
 	 */
 	private void deleteLegacyFile(final File file) throws Exception {
+		final File working = (File) versionableAPI.findWorkingVersion(file.getIdentifier(), sysUser,
+				!RESPECT_ANON_PERMISSIONS);
 		final List<Versionable> legacyFileVersions = findAllVersions(file);
 		deleteAllVersions(legacyFileVersions);
+		fileAPI.delete(working, sysUser, !RESPECT_FRONTEND_ROLES);
 	}
 
 	/**
