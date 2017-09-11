@@ -174,7 +174,7 @@ public class LegacyFilesMigrator {
 		final String whereClause = "WHERE parent_path IS NULL OR parent_path = '' OR parent_path = ' ' AND asset_type = 'file_asset'";
 		String query = "SELECT id FROM identifier " + whereClause;
 		dc.setSQL(query);
-		List<Map<String, Object>> results = dc.loadObjectResults();
+		final List<Map<String, Object>> results = dc.loadObjectResults();
 		if (!results.isEmpty()) {
 			Logger.info(this.getClass(), " \n=== A total of " + results.size()
 					+ " legacy files have an invalid parent path. Fixing data... ===");
@@ -205,7 +205,7 @@ public class LegacyFilesMigrator {
 	 */
 	private Structure getFileAssetContentType(final String varName, final User user)
 			throws DotSecurityException, DotDataException {
-		Structure contentType = StructureFactory.getStructureByVelocityVarName(varName);
+		final Structure contentType = StructureFactory.getStructureByVelocityVarName(varName);
 		if (!APILocator.getPermissionAPI().doesUserHavePermission(contentType, PermissionAPI.PERMISSION_READ, user)) {
 			throw new DotSecurityException(
 					"User [" + user.getUserId() + "] does not have permission to access Content Type " + varName);
@@ -229,7 +229,7 @@ public class LegacyFilesMigrator {
 		// the new content file
 		final Identifier legacyIdentifier = identifierAPI.find(file);
 		final VersionInfo versionInfo = versionableAPI.getVersionInfo(legacyIdentifier.getId());
-		List<Versionable> legacyFileVersions = findAllVersions(file);
+		final List<Versionable> legacyFileVersions = findAllVersions(file);
 		final java.io.File fileReferenceInFS = fileAPI.getAssetIOFile(file);
 		if (null == fileReferenceInFS || !fileReferenceInFS.exists()) {
 			Logger.warn(this,
@@ -495,7 +495,7 @@ public class LegacyFilesMigrator {
 	 * @param fileReference
 	 *            - The reference to the original legacy file.
 	 */
-	private void deleteFilesInFileSystem(java.io.File fileReference) {
+	private void deleteFilesInFileSystem(final java.io.File fileReference) {
 		final String legacyFileName = fileReference.getName();
 		final java.io.File parentDir = fileReference.getParentFile();
 		if (parentDir.isDirectory()) {
