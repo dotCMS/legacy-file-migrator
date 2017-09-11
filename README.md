@@ -1,16 +1,16 @@
-h1. Legacy File Migrator for dotCMS 3.3
+# Legacy File Migrator for dotCMS 3.3
 
 This OSGi plugin is in charge of migrating the deprecated Legacy Files to the new Files as Content. This migration is required for all customers who will be upgrading their environments to dotCMS 4.x as Legacy Files will not be handled by our code base anymore.
 
 
 
-h2. How to build this plugin
+## How to build this plugin
 
 To install it, all you need to do is build the JAR. To do this, just run
 *./gradlew clean jar* and Gradle will build a .JAR inside the build/libs directory. Building the first time will take longer as many dependencies will be downloaded.
 
 
-h2. Pre-setup
+## Pre-setup
 
 Please follow these steps in order to set up everything you need for the migration process:
 
@@ -22,7 +22,7 @@ SELECT COUNT(DISTINCT(identifier)) FROM file_asset;
 3. In case you have a custom page extension (e.g., the "dot" postfix in legacy HTML pages), make sure that the plugin is in place.
 
 
-h2. Running the Migrator
+## Running the Migrator
 
 In order to install this bundle, copy the bundle jar file inside the Felix OSGI container (dotCMS/felix/load) OR upload the bundle jar file using the dotCMS UI (CMS Admin -> Dynamic Plugins -> Upload Plugin).
 
@@ -48,7 +48,7 @@ SELECT COUNT(DISTINCT(identifier)) FROM file_asset;
 
 ________________________________________________________________________________________
 
-h1. WARNING (!)
+# WARNING (!)
 
 * ALWAYS CREATE A DB AND ASSETS BACKUP before running the migrator process in case particular errors arise and it's required to start all over.
 
