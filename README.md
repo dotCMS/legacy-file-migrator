@@ -34,7 +34,7 @@ The migrator process will start as soon as the plugin is uploaded and on a separ
 4. All Legacy Files with the "SYSTEM_HOST" Inode will be deleted, NOT MIGRATED, as the new Files as Content MUST live inside a specific Site.
 5. Legacy Files that lost or are not associated to a file reference in the file system will be deleted, no exception.
 
-The migration task will begin and its progress will be logged via the ``dotcms.out`` file (or the appropriate logging file for the specific container or WAS you use). The Legacy Files will be processed per Site, and the time it will take to finish will depend heavily on the number of Legacy Files to transform and its size. Once the migration is over, the following message will be displayed in the logging file:
+The migration task will begin and its progress will be logged via the ``dotcms.log`` file (or the appropriate logging file for the specific container or WAS you use). The Legacy Files will be processed per Site, and the time it will take to finish will depend heavily on the number of Legacy Files to transform and its size. Once the migration is over, the following message will be displayed in the logging file:
 ```
 -> Total processed files = <TOTAL-PROCESSED-FILES>
  
