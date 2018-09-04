@@ -15,7 +15,7 @@ import com.dotmarketing.loggers.Log4jUtil;
  * process.
  * 
  * @author Jose Orsini, Jose Castro
- * @version 3.3
+ * @version 3.3, 3.7.1
  * @since Aug 30th, 2017
  */
 public class Activator extends GenericBundleActivator {
@@ -23,10 +23,10 @@ public class Activator extends GenericBundleActivator {
 	private LoggerContext pluginLoggerContext;
 
 	@Override
-	public void start(BundleContext context) throws Exception {
-		//Initializing log4j...
-        LoggerContext dotcmsLoggerContext = Log4jUtil.getLoggerContext();
-        //Initialing the log4j context of this plugin based on the dotCMS logger context
+	public void start(final BundleContext context) throws Exception {
+		// Initializing Log4j
+        final LoggerContext dotcmsLoggerContext = Log4jUtil.getLoggerContext();
+        // Initializing the log4j context of this plugin based on the dotCMS logger context
         pluginLoggerContext = (LoggerContext) LogManager.getContext(this.getClass().getClassLoader(),
                 false,
                 dotcmsLoggerContext,
@@ -49,10 +49,10 @@ public class Activator extends GenericBundleActivator {
 	}
 
 	@Override
-	public void stop(BundleContext context) throws Exception {
+	public void stop(final BundleContext context) throws Exception {
 		// Unpublish bundle services
 		unpublishBundleServices();
-		//Shutting down log4j in order to avoid memory leaks
+		// Shutting down log4j in order to avoid memory leaks
         Log4jUtil.shutdown(pluginLoggerContext);
 	}
 

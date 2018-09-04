@@ -1,22 +1,10 @@
 package com.dotmarketing.osgi.util;
 
-import java.io.IOException;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
 import com.dotcms.repackage.org.apache.commons.io.FilenameUtils;
 import com.dotmarketing.beans.Host;
 import com.dotmarketing.beans.Identifier;
 import com.dotmarketing.beans.VersionInfo;
-import com.dotmarketing.business.APILocator;
-import com.dotmarketing.business.CacheLocator;
-import com.dotmarketing.business.DotStateException;
-import com.dotmarketing.business.IdentifierAPI;
-import com.dotmarketing.business.PermissionAPI;
-import com.dotmarketing.business.UserAPI;
-import com.dotmarketing.business.Versionable;
-import com.dotmarketing.business.VersionableAPI;
+import com.dotmarketing.business.*;
 import com.dotmarketing.common.db.DotConnect;
 import com.dotmarketing.db.HibernateUtil;
 import com.dotmarketing.exception.DotDataException;
@@ -33,8 +21,14 @@ import com.dotmarketing.portlets.languagesmanager.business.LanguageAPI;
 import com.dotmarketing.portlets.structure.factories.StructureFactory;
 import com.dotmarketing.portlets.structure.model.Structure;
 import com.dotmarketing.util.Logger;
+import com.dotmarketing.util.UtilMethods;
 import com.liferay.portal.model.User;
 import com.liferay.util.FileUtil;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.*;
 
 /**
  * This service is in charge of retrieving all the legacy files from all the
@@ -44,7 +38,7 @@ import com.liferay.util.FileUtil;
  * 4.x at any level anymore.
  * 
  * @author Jose Orsini, Jose Castro
- * @version 3.3
+ * @version 3.3, 3.7.1
  * @since Aug 28th, 2017
  *
  */
@@ -63,6 +57,8 @@ public class LegacyFilesMigrator {
 
 	private static final boolean RESPECT_FRONTEND_ROLES = Boolean.TRUE;
 	private static final boolean RESPECT_ANON_PERMISSIONS = Boolean.TRUE;
+
+	private static final String SITES_FILE_NAME = "sites.txt";
 
 	/**
 	 * Default class constructor. Initializes the different APIs required to
@@ -95,9 +91,9 @@ public class LegacyFilesMigrator {
 			sysUser = userAPI.getSystemUser();
 			fileAssetContentType = getFileAssetContentType("FileAsset", sysUser);
 			int migrated = 0;
-			final List<Host> siteList = siteAPI.findAll(sysUser, false);
+			final List<Host> siteList = getSites();
 			if (null != siteList && !siteList.isEmpty()) {
-				for (Host site : siteList) {
+				for (final Host site : siteList) {
 					Logger.info(this.getClass(),
 							" \n**********************************************************************\n"
 									+ "-> Migrating files for Site '" + site.getHostname() + "'");
@@ -112,7 +108,7 @@ public class LegacyFilesMigrator {
 					final List<File> filesPerSite = fileAPI.getAllHostFiles(site, !isLiveInode, sysUser,
 							!RESPECT_FRONTEND_ROLES);
 					int counter = 1;
-					for (File legacyFile : filesPerSite) {
+					for (final File legacyFile : filesPerSite) {
 						if (migrated == 0) {
 							HibernateUtil.startTransaction();
 						}
@@ -142,7 +138,7 @@ public class LegacyFilesMigrator {
 				Logger.error(this.getClass(),
 						" \nAn error occurred: No Sites could be retrieved. Have you tried re-indexing your contents first?\n");
 			}
-		} catch (Exception ex) {
+		} catch (final Exception ex) {
 			try {
 				Logger.error(this.getClass(), "An error occurred when migrating Files to Contents: " + ex.getMessage(),
 						ex);
@@ -181,12 +177,67 @@ public class LegacyFilesMigrator {
 			query = "UPDATE identifier SET parent_path = '/' " + whereClause;
 			dc.setSQL(query);
 			dc.loadResult();
-			for (Map<String, Object> record : results) {
+			for (final Map<String, Object> record : results) {
 				final String identifier = record.get("id").toString();
 				CacheLocator.getIdentifierCache().removeFromCacheByIdentifier(identifier);
 			}
 		}
 	}
+
+	/**
+	 * Retrieves the list of Sites that will have their Legacy Files migrated to Files as Content. There are currently
+	 * two ways of providing these Sites:
+	 * <ol>
+	 *     <li>Letting the plugin query the database and obtain the Sites.</li>
+	 * 		<li>Passing down the Identifier of every Site through the {@code src/main/resources/sites.txt} file. This
+	 * 		file will contain an enter-separated list of all the Site Identifiers that must be processed.</li>
+	 * </ol>
+	 *
+	 * @return The list of {@link Host} objects whose Legacy Files will be migrated.
+	 */
+	private List<Host> getSites() throws DotSecurityException, DotDataException, IOException {
+		List<Host> siteList = new ArrayList<>();
+		boolean readFromApi = Boolean.TRUE;
+		try (final InputStream sitesFileInputStream = LegacyFilesMigrator.class.getResourceAsStream("/" + SITES_FILE_NAME);) {
+		    final String contents = readFile(sitesFileInputStream);
+			final List<String> siteIdentifierList = new ArrayList<>();
+			if (UtilMethods.isSet(contents)) {
+                siteIdentifierList.addAll(Arrays.asList(contents.split("\n")));
+            }
+			if (UtilMethods.isSet(siteIdentifierList) && !siteIdentifierList.isEmpty()) {
+				readFromApi = Boolean.FALSE;
+				for (final String siteId : siteIdentifierList) {
+					final Host site = siteAPI.find(siteId, sysUser, !RESPECT_FRONTEND_ROLES);
+					if (UtilMethods.isSet(site) && UtilMethods.isSet(site.getIdentifier())) {
+						siteList.add(site);
+					}
+				}
+			}
+		}
+		if (readFromApi) {
+			siteList = siteAPI.findAll(sysUser, !RESPECT_FRONTEND_ROLES);
+		}
+		return siteList;
+	}
+
+    /**
+     * Reads the contents of a file represented as an {@link InputStream}.
+     *
+     * @param fileInputStream The content of a given file as an {@link InputStream}.
+     *
+     * @return The contents of the file as String.
+     *
+     * @throws IOException An error occurred when reading the file.
+     */
+    private String readFile(final InputStream fileInputStream) throws IOException {
+        final ByteArrayOutputStream result = new ByteArrayOutputStream();
+        final byte[] buffer = new byte[1024];
+        int length;
+        while ((length = fileInputStream.read(buffer)) != -1) {
+            result.write(buffer, 0, length);
+        }
+        return result.toString("UTF-8");
+    }
 
 	/**
 	 * Looks up the Content Type object associated to the velocity variable name
@@ -274,7 +325,7 @@ public class LegacyFilesMigrator {
 			if (clive != null) {
 				try {
 					checkinLive(clive);
-				} catch (DotContentletValidationException e) {
+				} catch (final DotContentletValidationException e) {
 					Logger.warn(this, "\nLegacy File '" + legacyIdentifier.getPath()
 							+ "' has invalid fields. Re-trying to check in without validation...");
 					clive.setProperty(Contentlet.DONT_VALIDATE_ME, Boolean.TRUE);
@@ -284,7 +335,7 @@ public class LegacyFilesMigrator {
 			} else {
 				try {
 					checkinWorking(cworking, versionInfo);
-				} catch (DotContentletValidationException e) {
+				} catch (final DotContentletValidationException e) {
 					Logger.warn(this, "\nLegacy File '" + legacyIdentifier.getPath()
 							+ "' has invalid fields. Re-trying to check in without validation...");
 					cworking.setProperty(Contentlet.DONT_VALIDATE_ME, Boolean.TRUE);
@@ -370,7 +421,7 @@ public class LegacyFilesMigrator {
 			if (originalFile.exists()) {
 				FileUtil.copyFile(originalFile, tmp);
 			}
-		} catch (IOException e) {
+		} catch (final IOException e) {
 			Logger.error(this.getClass(), "Error processing Stream", e);
 		}
 		return tmp;
@@ -466,7 +517,7 @@ public class LegacyFilesMigrator {
 	 */
 	private void deleteAllVersions(final List<Versionable> legacyFileVersions) throws IOException {
 		if (null != legacyFileVersions) {
-			for (Versionable versionable : legacyFileVersions) {
+			for (final Versionable versionable : legacyFileVersions) {
 				final File legacyFile = (File) versionable;
 				final java.io.File fileReference = fileAPI.getAssetIOFile(legacyFile);
 				if (null != fileReference && fileReference.exists()) {
@@ -499,7 +550,7 @@ public class LegacyFilesMigrator {
 		final String legacyFileName = fileReference.getName();
 		final java.io.File parentDir = fileReference.getParentFile();
 		if (parentDir.isDirectory()) {
-			for (java.io.File file : parentDir.listFiles()) {
+			for (final java.io.File file : parentDir.listFiles()) {
 				if (!file.isDirectory() && file.getName().contains(FilenameUtils.removeExtension(legacyFileName))) {
 					file.delete();
 				}
