@@ -2,7 +2,7 @@ package com.dotmarketing.osgi.override;
 
 import com.dotcms.repackage.org.osgi.framework.BundleContext;
 import com.dotmarketing.osgi.GenericBundleActivator;
-import com.dotmarketing.osgi.util.LegacyFilesMigrator;
+import com.dotmarketing.osgi.migrator.LegacyFilesMigrator;
 import com.dotcms.repackage.org.apache.logging.log4j.LogManager;
 import com.dotcms.repackage.org.apache.logging.log4j.core.LoggerContext;
 import com.dotmarketing.loggers.Log4jUtil;
@@ -21,13 +21,14 @@ import com.dotmarketing.loggers.Log4jUtil;
 public class Activator extends GenericBundleActivator {
 
 	private LoggerContext pluginLoggerContext;
+	private LegacyFilesMigrator migrator;
 
 	@Override
 	public void start(final BundleContext context) throws Exception {
 		// Initializing Log4j
         final LoggerContext dotcmsLoggerContext = Log4jUtil.getLoggerContext();
         // Initializing the log4j context of this plugin based on the dotCMS logger context
-        pluginLoggerContext = (LoggerContext) LogManager.getContext(this.getClass().getClassLoader(),
+        this.pluginLoggerContext = (LoggerContext) LogManager.getContext(this.getClass().getClassLoader(),
                 false,
                 dotcmsLoggerContext,
                 dotcmsLoggerContext.getConfigLocation());
@@ -36,12 +37,12 @@ public class Activator extends GenericBundleActivator {
 		initializeServices(context);
 		// Expose bundle elements
 		publishBundleServices(context);
-		final LegacyFilesMigrator migrator = new LegacyFilesMigrator();
+		this.migrator = new LegacyFilesMigrator();
 		Thread migrationThread = new Thread(new Runnable() {
 
 			@Override
 			public void run() {
-				migrator.migrateLegacyFiles();
+				migrator.startMigration();
 			}
 
 		});
@@ -52,8 +53,9 @@ public class Activator extends GenericBundleActivator {
 	public void stop(final BundleContext context) throws Exception {
 		// Unpublish bundle services
 		unpublishBundleServices();
+		this.migrator.stopMigration();
 		// Shutting down log4j in order to avoid memory leaks
-        Log4jUtil.shutdown(pluginLoggerContext);
+        Log4jUtil.shutdown(this.pluginLoggerContext);
 	}
 
 }
