@@ -224,10 +224,7 @@ public class MigratorDAO {
 			results = dc.loadObjectResults(conn);
 			for (final Map<String, Object> record : results) {
 				final String identifier = record.get("identifier").toString();
-				// final String inode = record.get("working_inode").toString();
 				final int status = Integer.parseInt(record.get("status").toString());
-				// final LegacyFile legacyFile = new LegacyFile(identifier, inode, serverId,
-				// status, StringUtils.EMPTY);
 				final LegacyFile legacyFile = new LegacyFile(identifier, serverId, status, StringUtils.EMPTY);
 				legacyFiles.add(legacyFile);
 			}
