@@ -4,7 +4,7 @@ apply plugin: 'war'
 apply plugin: 'eclipse'
 
 sourceCompatibility = '1.8'
-version = '1.0'
+version = '2.0'
 
 
 repositories {
@@ -25,7 +25,7 @@ jar {
     manifest {
         name = 'Osgi Override class'
         instruction 'Bundle-Vendor', 'dotcms'
-        instruction 'Bundle-Description', 'dotCMS OSGi Plugin for Migrating Legacy Files'
+        instruction 'Bundle-Description', 'dotCMS OSGi Plugin for Migrating Legacy Files - dotCMS 3.7.1'
         instruction 'Bundle-DocURL', 'http://www.dotcms.com'
         instruction 'Bundle-Activator', 'com.dotmarketing.osgi.override.Activator'
         instruction 'Override-Classes', 'com.dotmarketing.portlets.folders.business.FolderAPIImpl,com.dotcms.content.elasticsearch.business.ESContentletAPIImpl'

@@ -12,6 +12,7 @@ import com.dotmarketing.beans.Permission;
 import com.dotmarketing.beans.VersionInfo;
 import com.dotmarketing.business.APILocator;
 import com.dotmarketing.business.CacheLocator;
+import com.dotmarketing.business.DotStateException;
 import com.dotmarketing.business.IdentifierAPI;
 import com.dotmarketing.business.PermissionAPI;
 import com.dotmarketing.business.UserAPI;
@@ -27,8 +28,12 @@ import com.dotmarketing.portlets.categories.model.Category;
 import com.dotmarketing.portlets.contentlet.business.ContentletAPI;
 import com.dotmarketing.portlets.contentlet.business.DotContentletStateException;
 import com.dotmarketing.portlets.contentlet.business.DotContentletValidationException;
+import com.dotmarketing.portlets.contentlet.business.HostAPI;
 import com.dotmarketing.portlets.contentlet.model.Contentlet;
+import com.dotmarketing.portlets.fileassets.business.FileAssetAPI;
 import com.dotmarketing.portlets.files.model.File;
+import com.dotmarketing.portlets.folders.business.FolderAPI;
+import com.dotmarketing.portlets.folders.model.Folder;
 import com.dotmarketing.portlets.languagesmanager.business.LanguageAPI;
 import com.dotmarketing.portlets.structure.factories.StructureFactory;
 import com.dotmarketing.portlets.structure.model.ContentletRelationships;
@@ -57,16 +62,19 @@ public class LegacyFilesMigrator {
 	private static IdentifierAPI identifierAPI;
 	private static UserAPI userAPI;
 	private static VersionableAPI versionableAPI;
-	private static User systemUser;
+	private static User SYSTEM_USER;
 	private static Structure fileAssetContentType;
 	private static Configuration pluginConfig;
 	private static MigratorDAO migratorDAO;
+	private static PermissionAPI permissionAPI;
+	private static HostAPI hostAPI;
+	private static FolderAPI folderAPI;
 
 	private static final boolean RESPECT_FRONTEND_ROLES = Boolean.TRUE;
 	private static final boolean RESPECT_ANON_PERMISSIONS = Boolean.TRUE;
 
 	private static boolean STOP_PROCESS = Boolean.FALSE;
-	
+
 	/**
 	 * Default class constructor. Initializes the different APIs required to perform
 	 * the Legacy Files transformation.
@@ -77,6 +85,9 @@ public class LegacyFilesMigrator {
 		identifierAPI = APILocator.getIdentifierAPI();
 		userAPI = APILocator.getUserAPI();
 		versionableAPI = APILocator.getVersionableAPI();
+		permissionAPI = APILocator.getPermissionAPI();
+		hostAPI = APILocator.getHostAPI();
+		folderAPI = APILocator.getFolderAPI();
 		pluginConfig = MigratorUtils.initPluginConfig();
 		migratorDAO = MigratorDAO.getInstance(pluginConfig);
 	}
@@ -95,15 +106,14 @@ public class LegacyFilesMigrator {
 		Logger.info(this.getClass(),
 				"NOTE: Files as Contents CANNOT LIVE UNDER SYSTEM_HOST anymore. Therefore, such Legacy Files will be automatically deleted.");
 		try {
-			migratorDAO.recreateMissingParentPath();
-			systemUser = userAPI.getSystemUser();
-			fileAssetContentType = getFileAssetContentType("FileAsset", systemUser);
+			migratorDAO.recreateMissingParentPaths();
+			SYSTEM_USER = userAPI.getSystemUser();
+			fileAssetContentType = getFileAssetContentType();
 			int migrated = 0;
 			int counter = 0;
-			final String countPendingLegacyFiles = migratorDAO.getCountPendingLegacyFiles();
 			final long startTimeInMills = System.currentTimeMillis();
-			Date now = new Date(startTimeInMills);
-			logStartInfo(now, countPendingLegacyFiles);
+			final Date now = new Date(startTimeInMills);
+			logStartInfo(now);
 			final List<LegacyFile> legacyFiles = new ArrayList<>();
 			migratorDAO.fillLegacyFileQueue(legacyFiles);
 			if (legacyFiles.isEmpty()) {
@@ -124,19 +134,21 @@ public class LegacyFilesMigrator {
 							startBatchTransaction = Boolean.FALSE;
 							HibernateUtil.startTransaction();
 						}
-						logging.append(counter + ". Legacy file ID: " + legacyFile.getIdentifier() + "\n");
+						logging.append("   " + counter + ". Legacy file ID: " + legacyFile.getIdentifier() + "\n");
 						try {
 							migratorDAO.updateLegacyFileRecord(legacyFile, MigrationStatus.PROCESSING);
 							migrateLegacyFile(legacyFile);
 							migratorDAO.updateLegacyFileRecord(legacyFile, MigrationStatus.MIGRATED);
 							migrated++;
 						} catch (final Exception e) {
-							Logger.error(this, String.format("An error occurred when migrating file: '%s'",
-									legacyFile.getIdentifier()), e);
+							Logger.error(this,
+									String.format("An error occurred when migrating file with Identifier: '%s'",
+											legacyFile.getIdentifier()),
+									e);
 							migratorDAO.updateLegacyFileRecord(legacyFile, MigrationStatus.ERROR, e);
 						} finally {
-							if (migrated == legacyFiles.size()
-									|| (migrated > 0 && migrated % pluginConfig.getLoggingFrequency() == 0)) {
+							if (counter == legacyFiles.size()
+									|| (counter > 0 && counter % pluginConfig.getLoggingFrequency() == 0)) {
 								Logger.info(this.getClass(), "\n" + logging.toString());
 								logging = new StringBuilder();
 							}
@@ -148,6 +160,7 @@ public class LegacyFilesMigrator {
 						logging = new StringBuilder();
 					}
 					HibernateUtil.commitTransaction();
+					Logger.info(this.getClass(), "Migrated files have been committed. Retrieving next batch...");
 					legacyFiles.clear();
 					if (STOP_PROCESS) {
 						Logger.info(this.getClass(), "The migration process has been manually stopped.");
@@ -155,10 +168,8 @@ public class LegacyFilesMigrator {
 					}
 					migratorDAO.fillLegacyFileQueue(legacyFiles);
 				} else {
-					final long endTimeInMills = System.currentTimeMillis();
-					now = new Date(endTimeInMills);
-					final long totalTimeInMills = endTimeInMills - startTimeInMills;
-					logShutdownInfo(now, totalTimeInMills, migrated);
+					// There are no more Legacy Files to migrate, log shutdown info
+					logShutdownInfo(startTimeInMills, migrated);
 					break;
 				}
 			}
@@ -167,24 +178,25 @@ public class LegacyFilesMigrator {
 				Logger.error(this.getClass(), "An error occurred when migrating Files to Contents.", ex);
 				HibernateUtil.rollbackTransaction();
 			} catch (final DotHibernateException e1) {
-				Logger.warn(this, e1.getMessage(), e1);
+				Logger.warn(this, "An error occurred when rolling back the DB transcation: " + e1.getMessage(), e1);
 			}
 		} finally {
 			try {
 				HibernateUtil.closeSession();
-			} catch (DotHibernateException e) {
+			} catch (final DotHibernateException e) {
 				Logger.error(this.getClass(), "An error occurred when closing the Hibernate session.", e);
 			}
 		}
 	}
 
 	/**
-	 * Stops the migration process in case the plugin is manually un-deployed or stopped.
+	 * Stops the migration process in case the plugin is manually un-deployed or
+	 * stopped.
 	 */
 	public void stopMigration() {
 		STOP_PROCESS = Boolean.TRUE;
 	}
-	
+
 	/**
 	 * Performs the migration of the legacy file to the new file as content. The DB
 	 * information associated to the Legacy File and its physical file can be
@@ -207,72 +219,78 @@ public class LegacyFilesMigrator {
 	public boolean migrateLegacyFile(final LegacyFile legacyFile) throws Exception {
 		// Retrieve Identifier object of the legacy file
 		final Identifier legacyIdentifier = identifierAPI.find(legacyFile.getIdentifier());
-		if (Host.SYSTEM_HOST.equals(legacyIdentifier.getHostId())) {
-			// Delete any Legacy File created under System Host
-			final File workingFile = (File) versionableAPI.findWorkingVersion(legacyIdentifier, systemUser,
-					!RESPECT_ANON_PERMISSIONS);
-			deleteLegacyFile(workingFile, legacyIdentifier);
-			return Boolean.FALSE;
-		}
-		Contentlet fileAsContent = null;
-		File legacyFileFromDb = null;
-		final VersionInfo versionInfo = versionableAPI.getVersionInfo(legacyIdentifier.getId());
-		// If live and working versions of the Legacy File are different...
-		if (versionInfo.getLiveInode() != null && !versionInfo.getLiveInode().equals(versionInfo.getWorkingInode())) {
-			legacyFileFromDb = (File) versionableAPI.findLiveVersion(legacyIdentifier, systemUser,
-					!RESPECT_ANON_PERMISSIONS);
-			// Create a Contentlet object using the properties of the LIVE version of the
-			// Legacy File
-			fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
-			// ============================================
-			// TODO: Delete zero-byte files too?
-			// ============================================
-			if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
-				// The binary file doesn't exist, delete the Legacy File altogether
-				deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
-				return Boolean.FALSE;
-			}
-		} else {
-			// Create a Contentlet object using the properties of the WORKING version of the
-			// Legacy File
-			legacyFileFromDb = (File) versionableAPI.findWorkingVersion(legacyIdentifier, systemUser,
-					!RESPECT_ANON_PERMISSIONS);
-			fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
-			if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
-				// The binary file doesn't exist, delete the Legacy File altogether
-				deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
-				return Boolean.FALSE;
-			}
-		}
-		// TODO: What is this code doing here?
-		//if (!permissionAPI.isInheritingPermissions(legacyFileFromDb)) { 
-		//	final boolean bitPermissions = Boolean.TRUE; final boolean onlyIndividualPermissions = Boolean.TRUE;
-		//	final boolean forceLoadFromDB = Boolean.TRUE;
-		// 	permissionAPI.getPermissions(legacyFileFromDb, bitPermissions, onlyIndividualPermissions, forceLoadFromDB);
-		//}
 		final Savepoint savepoint = HibernateUtil.setSavepoint();
 		try {
+			if (!isValidLegacyFile(legacyIdentifier)) {
+				// Delete any Legacy File flagged as "invalid"
+				final File workingFile = (File) versionableAPI.findWorkingVersion(legacyIdentifier, SYSTEM_USER,
+						!RESPECT_ANON_PERMISSIONS);
+				deleteLegacyFile(workingFile, legacyIdentifier);
+				return Boolean.FALSE;
+			}
+			Contentlet fileAsContent = null;
+			File legacyFileFromDb = null;
+			final VersionInfo versionInfo = versionableAPI.getVersionInfo(legacyIdentifier.getId());
+			// If live and working versions of the Legacy File are different...
+			if (versionInfo.getLiveInode() != null
+					&& !versionInfo.getLiveInode().equals(versionInfo.getWorkingInode())) {
+				legacyFileFromDb = (File) versionableAPI.findLiveVersion(legacyIdentifier, SYSTEM_USER,
+						!RESPECT_ANON_PERMISSIONS);
+				// Create a Contentlet object using the properties of the LIVE version of the
+				// Legacy File
+				fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
+				if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
+					// The binary file doesn't exist, delete the Legacy File altogether
+					deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
+					return Boolean.FALSE;
+				}
+			} else {
+				// Create a Contentlet object using the properties of the WORKING version of the
+				// Legacy File
+				legacyFileFromDb = (File) versionableAPI.findWorkingVersion(legacyIdentifier, SYSTEM_USER,
+						!RESPECT_ANON_PERMISSIONS);
+				fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
+				if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
+					// The binary file doesn't exist, delete the Legacy File altogether
+					deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
+					return Boolean.FALSE;
+				}
+			}
+			// TODO: What is this code doing here?
+			if (!permissionAPI.isInheritingPermissions(legacyFileFromDb)) {
+				final boolean bitPermissions = Boolean.TRUE;
+				final boolean onlyIndividualPermissions = Boolean.TRUE;
+				final boolean forceLoadFromDB = Boolean.TRUE;
+				permissionAPI.getPermissions(legacyFileFromDb, bitPermissions, onlyIndividualPermissions,
+						forceLoadFromDB);
+			}
 			// Shallow deletion of legacy file
 			deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
-			// ==========================================================
-			// TODO: WHAT ABOUT PERMISIONS? SHOULD WE DELETE THEM HERE?
-			// ==========================================================
 			HibernateUtil.getSession().clear();
 			CacheLocator.getIdentifierCache().removeFromCacheByIdentifier(legacyIdentifier.getId());
-			// If a live and working versions of the Legacy Files are different, check in
-			// the live version
 			try {
+				// If a live and working versions of the Legacy Files are different, check in
+				// the live version
 				checkinFileAsContentlet(fileAsContent, versionInfo);
 			} catch (final DotContentletValidationException e) {
-				Logger.warn(this, "\nLegacy File '" + legacyIdentifier.getPath()
-						+ "' has invalid fields. Re-trying to check in without validation...");
+				Logger.warn(this, "\nLegacy File '" + legacyIdentifier.getPath() + "' (" + legacyIdentifier.getId()
+						+ ") has invalid fields. Re-trying to check-in without validation...");
 				fileAsContent.setProperty(Contentlet.DONT_VALIDATE_ME, Boolean.TRUE);
-				checkinFileAsContentlet(fileAsContent, versionInfo);
-				Logger.warn(this, "Done.");
+				try {
+					checkinFileAsContentlet(fileAsContent, versionInfo);
+					Logger.warn(this, "Check-in without validation ran successfully.");
+				} catch (final Exception e2) {
+					// Non-validated version checkin failed too, throw exception
+					Logger.warn(this, "Check-in without validation failed again.");
+					throw e2;
+				}
 			}
 		} catch (final Exception e) {
 			// The file failed to be migrated. Just roll back to the Save Point and move on
 			// to the next file
+			Logger.error(this,
+					String.format("An error occured when migrating file '%s'. Rolling back to previous SavePoint.",
+							legacyFile.getIdentifier()));
 			HibernateUtil.rollbackSavepoint(savepoint);
 			throw e;
 		}
@@ -283,10 +301,6 @@ public class LegacyFilesMigrator {
 	 * Looks up the Content Type object associated to the velocity variable name for
 	 * the File Asset Content Type.
 	 * 
-	 * @param varName
-	 *            - The velocity variable name for the File Asset Content Type.
-	 * @param user
-	 *            - The user performing this action.
 	 * @return The File Asset Content Type object.
 	 * @throws DotSecurityException
 	 *             The specified user does not have permissions to access the File
@@ -294,14 +308,57 @@ public class LegacyFilesMigrator {
 	 * @throws DotDataException
 	 *             An error occurred when interacting with the data source.
 	 */
-	private Structure getFileAssetContentType(final String varName, final User user)
-			throws DotSecurityException, DotDataException {
-		final Structure contentType = StructureFactory.getStructureByVelocityVarName(varName);
-		if (!APILocator.getPermissionAPI().doesUserHavePermission(contentType, PermissionAPI.PERMISSION_READ, user)) {
+	private Structure getFileAssetContentType() throws DotSecurityException, DotDataException {
+		final Structure contentType = StructureFactory
+				.getStructureByVelocityVarName(FileAssetAPI.DEFAULT_FILE_ASSET_STRUCTURE_VELOCITY_VAR_NAME);
+		if (!permissionAPI.doesUserHavePermission(contentType, PermissionAPI.PERMISSION_READ, SYSTEM_USER)) {
 			throw new DotSecurityException(
-					"User [" + user.getUserId() + "] does not have permission to access Content Type " + varName);
+					"User [" + SYSTEM_USER.getUserId() + "] does not have permission to access Content Type "
+							+ FileAssetAPI.DEFAULT_FILE_ASSET_STRUCTURE_VELOCITY_VAR_NAME);
 		}
 		return contentType;
+	}
+
+	/**
+	 * Performs a series of validations on the Legacy File in order to determine if
+	 * it's worth it to migrate it or not. Usually, a file that has been flagged as
+	 * "invalid" will be deleted altogether.
+	 * 
+	 * @param legacyIdentifier
+	 *            - The {@link Identifier} of the Legacy File Asset.
+	 * @return If the file complies with the business requirements, returns
+	 *         {@code true}. Otherwise, returns {@code false}.
+	 * @throws DotStateException
+	 * @throws DotDataException
+	 *             An error occurred when accessing the data source.
+	 * @throws DotSecurityException
+	 *             The specified user does not have the required permissions to
+	 *             perform this action.
+	 */
+	private boolean isValidLegacyFile(final Identifier legacyIdentifier)
+			throws DotStateException, DotDataException, DotSecurityException {
+		// If the Site containing the file is SYSTEM_HOST
+		if (Host.SYSTEM_HOST.equals(legacyIdentifier.getHostId())) {
+			Logger.warn(this, String.format("Host ID of Legacy File '%s%s' (%s) is SYSTEM_HOST. Deleting file...",
+					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId()));
+			return Boolean.FALSE;
+		}
+		// If the Site containing the file is not a valid Site
+		final Host parentSite = hostAPI.find(legacyIdentifier.getHostId(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
+		if (null == parentSite || !UtilMethods.isSet(parentSite.getIdentifier())) {
+			Logger.warn(this, String.format(
+					"Host ID of Legacy File '%s%s' (%s) is not pointing to a valid Site: '%s'. Deleting file...",
+					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId(),
+					legacyIdentifier.getHostId()));
+			return Boolean.FALSE;
+		}
+		// If the file name is "."
+		if (".".equals(legacyIdentifier.getAssetName())) {
+			Logger.warn(this, String.format("Legacy File '%s%s' (%s) has an invalid name. Deleting file...",
+					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId()));
+			return Boolean.FALSE;
+		}
+		return Boolean.TRUE;
 	}
 
 	/**
@@ -320,7 +377,7 @@ public class LegacyFilesMigrator {
 	 */
 	private void deleteLegacyFile(final File file, final Identifier legacyIdentifier) throws DotDataException {
 		InodeFactory.deleteInode(file);
-		APILocator.getIdentifierAPI().delete(legacyIdentifier);
+		identifierAPI.delete(legacyIdentifier);
 	}
 
 	/**
@@ -347,9 +404,9 @@ public class LegacyFilesMigrator {
 			throws DotContentletValidationException, DotContentletStateException, IllegalArgumentException,
 			DotDataException, DotSecurityException {
 		final Contentlet savedContentlet = contAPI.checkin(contentlet, new ContentletRelationships(contentlet),
-				new ArrayList<Category>(), new ArrayList<Permission>(), systemUser, !RESPECT_FRONTEND_ROLES);
+				new ArrayList<Category>(), new ArrayList<Permission>(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
 		if (versionInfo.getLiveInode() != null && versionInfo.getLiveInode().equals(savedContentlet.getInode())) {
-			contAPI.publish(savedContentlet, systemUser, !RESPECT_FRONTEND_ROLES);
+			contAPI.publish(savedContentlet, SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
 		}
 	}
 
@@ -370,15 +427,21 @@ public class LegacyFilesMigrator {
 		fileAsContent.setStructureInode(fileAssetContentType.getInode());
 		fileAsContent.setLanguageId(langAPI.getDefaultLanguage().getId());
 		fileAsContent.setInode(file.getInode());
-		fileAsContent.setIdentifier(file.getIdentifier());
+		fileAsContent.setIdentifier(legacyIdentifier.getId());
 		fileAsContent.setModUser(file.getModUser());
 		fileAsContent.setModDate(file.getModDate());
 		fileAsContent.setStringProperty("title", file.getFileName());
 		fileAsContent.setStringProperty("fileName", file.getFileName());
 		fileAsContent.setStringProperty("description", file.getTitle());
 		fileAsContent.setHost(legacyIdentifier.getHostId());
-		fileAsContent.setFolder(APILocator.getFolderAPI().findFolderByPath(legacyIdentifier.getParentPath(),
-				legacyIdentifier.getHostId(), systemUser, !RESPECT_FRONTEND_ROLES).getInode());
+		final Folder parentFolder = folderAPI.findFolderByPath(legacyIdentifier.getParentPath(),
+				legacyIdentifier.getHostId(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
+		if (null != parentFolder && UtilMethods.isSet(parentFolder.getInode())) {
+			fileAsContent.setFolder(parentFolder.getInode());
+		} else {
+			throw new Exception(String.format("Parent path '%s' for file '%s' (%s) was not found.",
+					legacyIdentifier.getParentPath(), file.getFileName(), legacyIdentifier.getId()));
+		}
 		fileAsContent.setBinary("fileAsset", MigratorUtils.getBinaryFileFromLegacyFile(file));
 		return fileAsContent;
 	}
@@ -388,10 +451,11 @@ public class LegacyFilesMigrator {
 	 * 
 	 * @param startDate
 	 *            - The date/time when the migration process started.
-	 * @param totalCountLegacyFiles
-	 *            - The total number of Legacy Files that will be processed.
+	 * @throws DotDataException
+	 *             An error occurred when accessing the data source.
 	 */
-	private void logStartInfo(final Date startDate, final String totalCountLegacyFiles) {
+	private void logStartInfo(final Date startDate) throws DotDataException {
+		final String totalCountLegacyFiles = migratorDAO.getCountPendingLegacyFiles();
 		final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 		Logger.info(this.getClass(), "---> Number of Legacy Files left to migrate: " + totalCountLegacyFiles);
 		Logger.info(this.getClass(), "---> Batch size: " + pluginConfig.getBatchSize());
@@ -402,14 +466,15 @@ public class LegacyFilesMigrator {
 	/**
 	 * Prints basic shutdown information of the migration process in the log file.
 	 * 
-	 * @param endDate
-	 *            - The date/time when the migration process finished.
-	 * @param totalTimeInMills
-	 *            - The total time in milliseconds of the whole process.
+	 * @param startTimeInMills
+	 *            - The time in milliseconds when the process started.
 	 * @param totalMigratedLegacyFiles
 	 *            - The total number of Legacy Files that were migrated.
 	 */
-	private void logShutdownInfo(final Date endDate, final long totalTimeInMills, final int totalMigratedLegacyFiles) {
+	private void logShutdownInfo(final long startTimeInMills, final int totalMigratedLegacyFiles) {
+		final long endTimeInMills = System.currentTimeMillis();
+		final Date endDate = new Date(endTimeInMills);
+		final long totalTimeInMills = endTimeInMills - startTimeInMills;
 		final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 		Logger.info(this.getClass(), "---> End time: " + sdf.format(endDate) + "\n");
 		Logger.info(this.getClass(), "---> Total time: " + MigratorUtils.getDurationBreakdown(totalTimeInMills) + "\n");

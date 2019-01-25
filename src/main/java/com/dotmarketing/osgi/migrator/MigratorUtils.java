@@ -106,7 +106,7 @@ public class MigratorUtils {
 
 	/**
 	 * Checks if the Binary File associated to the specified Contentlet exists or
-	 * not.
+	 * not. Files with size zero will be considered as missing.
 	 * 
 	 * @param contentlet
 	 *            - The Contentlet whose Binary File will be checked.

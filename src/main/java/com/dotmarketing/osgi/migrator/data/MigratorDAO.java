@@ -37,9 +37,9 @@ import com.dotmarketing.util.Logger;
  */
 public class MigratorDAO {
 
-	private Configuration pluginConfig;
+	private final Configuration pluginConfig;
 
-	private MigratorDAO(Configuration pluginConfig) {
+	private MigratorDAO(final Configuration pluginConfig) {
 		this.pluginConfig = pluginConfig;
 	}
 
@@ -50,7 +50,7 @@ public class MigratorDAO {
 
 		private static MigratorDAO INSTANCE;
 
-		private static MigratorDAO createInstance(Configuration pluginConfig) {
+		private static MigratorDAO createInstance(final Configuration pluginConfig) {
 			INSTANCE = new MigratorDAO(pluginConfig);
 			return INSTANCE;
 		}
@@ -65,7 +65,7 @@ public class MigratorDAO {
 	 *            properties of this plugin.
 	 * @return A unique instance of the {@link MigratorDAO} class.
 	 */
-	public static MigratorDAO getInstance(Configuration pluginConfig) {
+	public static MigratorDAO getInstance(final Configuration pluginConfig) {
 		return SingletonHolder.createInstance(pluginConfig);
 	}
 
@@ -77,7 +77,7 @@ public class MigratorDAO {
 	 * @throws DotDataException
 	 *             An error occurred when updating the records in the data source.
 	 */
-	public void recreateMissingParentPath() throws DotDataException {
+	public void recreateMissingParentPaths() throws DotDataException {
 		final DotConnect dc = new DotConnect();
 		final String whereClause = "WHERE parent_path IS NULL OR parent_path = '' OR parent_path = ' ' AND asset_type = 'file_asset'";
 		String query = "SELECT id FROM identifier " + whereClause;
@@ -128,7 +128,8 @@ public class MigratorDAO {
 	 *             An error occurred when updating the Legacy File's processing
 	 *             status.
 	 */
-	public void updateLegacyFileRecord(LegacyFile legacyFile, MigrationStatus status) throws DotDataException {
+	public void updateLegacyFileRecord(final LegacyFile legacyFile, final MigrationStatus status)
+			throws DotDataException {
 		updateLegacyFileRecord(legacyFile, status, null);
 	}
 
@@ -147,16 +148,21 @@ public class MigratorDAO {
 	 *             An error occurred when updating the Legacy File's processing
 	 *             status.
 	 */
-	public void updateLegacyFileRecord(LegacyFile legacyFile, MigrationStatus status, Exception exception)
-			throws DotDataException {
-		DotConnect dc = new DotConnect();
-		StringBuilder query = new StringBuilder();
-		query.append("UPDATE file_migration SET status = ").append(status.getStatus());
+	public void updateLegacyFileRecord(final LegacyFile legacyFile, final MigrationStatus status,
+			final Exception exception) throws DotDataException {
+		final DotConnect dc = new DotConnect();
+		final StringBuilder query = new StringBuilder();
+		query.append("UPDATE file_migration SET status = ?");
 		if (null != exception) {
-			query.append(", errormsg = '").append(ExceptionUtils.getStackTrace(exception)).append("'");
+			query.append(", errormsg = ?");
 		}
-		query.append(" WHERE identifier = '").append(legacyFile.getIdentifier()).append("'");
+		query.append(" WHERE identifier = ?");
 		dc.setSQL(query.toString());
+		dc.addParam(status.getStatus());
+		if (null != exception) {
+			dc.addParam(ExceptionUtils.getFullStackTrace(exception));
+		}
+		dc.addParam(legacyFile.getIdentifier());
 		dc.loadResult();
 	}
 
@@ -176,7 +182,7 @@ public class MigratorDAO {
 			HibernateUtil.startTransaction();
 			legacyFiles.addAll(getLegacyFileBatchFromDb());
 			HibernateUtil.commitTransaction();
-		} catch (Exception ex) {
+		} catch (final Exception ex) {
 			HibernateUtil.rollbackTransaction();
 			throw (ex);
 		} finally {
