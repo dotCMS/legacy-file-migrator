@@ -29,6 +29,7 @@ SELECT COUNT(DISTINCT(identifier)) FROM file_asset;
 3. It's a good idea to run the Fix Assets Inconsistencies tool before running the migrator. Inconsistent data can interfere with the process and increase the troubleshooting times.
 4. As a health check, make sure that you have successfully re-indexed 100% of your contents and the ElasticSearch index is working correctly (green status).
 5. Flush ALL of your cache regions and Menu Cache right before starting the migration of the Legacy Files (.i.e, before uploading the plugin).
+6. The migration process will print a high amount of information in the log file. So, it's always a good idea to disable/stop as many activities as possible, such as: Content editing, Push Publishing, Link Checker Job, and any other custom Quartz Jobs or plugins that might generate unnecessary noise in the log.
 6. There a are few configuration properties that you can review or set which allow you to have more control on the behavior of the plugin:
 
 Property | Description
