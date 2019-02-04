@@ -481,7 +481,12 @@ public class ESContentletAPIImpl implements ContentletAPI {
             throw new DotContentletStateException("Only the working version can be published");
 
         // writes the contentlet object to a file
-        indexAPI.addContentToIndex(contentlet, true, true);
+        /**
+         * Legacy Files converted to Files as Content WILL NOT be automatically reindexed
+         * during the process. Devs/Sys Admins will need to kick off a specific File Asset 
+         * reindex when the migration is finished.
+         */
+        //indexAPI.addContentToIndex(contentlet, true, true);
 
         // DOTCMS - 4393
         // Publishes the files associated with the Contentlet
@@ -3808,17 +3813,10 @@ public class ESContentletAPIImpl implements ContentletAPI {
         }
         String stInode = contentlet.getStructureInode();
         if(!InodeUtils.isSet(stInode)){
-            throw new DotContentletValidationException("The contentlet: "+ (contentlet != null ? contentlet.getIdentifier() : "Unknown") 
-            		+" structureInode must be set");
+        	throw new DotContentletValidationException("Contentlet ["+ (contentlet != null ? contentlet.getIdentifier() : "Unknown/New")
+                    + "] is not associated to any Content Type.");
         }
         Structure st = CacheLocator.getContentTypeCache().getStructureByInode(contentlet.getStructureInode());
-        
-        
-        
-        
-        
-        
-        
         if(Structure.STRUCTURE_TYPE_FILEASSET==st.getStructureType()){
             if(contentlet.getHost()!=null && contentlet.getHost().equals(Host.SYSTEM_HOST) && (!UtilMethods.isSet(contentlet.getFolder()) || contentlet.getFolder().equals(FolderAPI.SYSTEM_FOLDER))){
                 DotContentletValidationException cve = new FileAssetValidationException("message.contentlet.fileasset.invalid.hostfolder");
@@ -3826,14 +3824,15 @@ public class ESContentletAPIImpl implements ContentletAPI {
                 throw cve;
             }
             boolean fileNameExists = false;
+            String fileName = StringUtils.EMPTY;
+            Folder folder = null;
             try {
                 Host host = APILocator.getHostAPI().find(contentlet.getHost(), APILocator.getUserAPI().getSystemUser(), false);
-                Folder folder = null;
                 if(UtilMethods.isSet(contentlet.getFolder()))
                     folder=APILocator.getFolderAPI().find(contentlet.getFolder(), APILocator.getUserAPI().getSystemUser(), false);
                 else
                     folder=APILocator.getFolderAPI().findSystemFolder();
-                String fileName = contentlet.getBinary(FileAssetAPI.BINARY_FIELD)!=null?contentlet.getBinary(FileAssetAPI.BINARY_FIELD).getName():"";
+                fileName = contentlet.getBinary(FileAssetAPI.BINARY_FIELD)!=null?contentlet.getBinary(FileAssetAPI.BINARY_FIELD).getName():"";
                 if(UtilMethods.isSet(contentlet.getStringProperty("fileName")))//DOTCMS-7093
                 	fileName = contentlet.getStringProperty("fileName");
                 if(UtilMethods.isSet(fileName)){
@@ -3849,9 +3848,11 @@ public class ESContentletAPIImpl implements ContentletAPI {
             } catch (Exception e) {
             	if(e instanceof FileAssetValidationException)
             		throw (FileAssetValidationException)e ;
-                throw new FileAssetValidationException("Unable to validate field: " + FileAssetAPI.BINARY_FIELD,e);
+            	throw new FileAssetValidationException("Unable to validate field: " + FileAssetAPI.BINARY_FIELD + " " +
+                        "in contentlet [" + (contentlet != null ? contentlet.getIdentifier() : "Unknown/New") + "]", e);
             }
             if(fileNameExists){
+            	Logger.error(this, "File '" + fileName + "' already exists under folder: " + folder.getPath());
                 DotContentletValidationException cve = new FileAssetValidationException("message.contentlet.fileasset.filename.already.exists");
                 cve.addBadTypeField(st.getFieldVar(FileAssetAPI.HOST_FOLDER_FIELD));
                 throw cve;
@@ -3859,10 +3860,6 @@ public class ESContentletAPIImpl implements ContentletAPI {
 
 
         }
-        
-        
-        
-        
         
         if(Structure.STRUCTURE_TYPE_HTMLPAGE == st.getStructureType()){
             if(contentlet.getHost()!=null && contentlet.getHost().equals(Host.SYSTEM_HOST) && (!UtilMethods.isSet(contentlet.getFolder()) || contentlet.getFolder().equals(FolderAPI.SYSTEM_FOLDER))){
@@ -3898,12 +3895,12 @@ public class ESContentletAPIImpl implements ContentletAPI {
 	        		String path = folder.getInode().equals(FolderAPI.SYSTEM_FOLDER)?"/"+url:folderId.getPath()+url;
 	        		Identifier htmlpage = APILocator.getIdentifierAPI().find(host, path);
 	        		if(htmlpage!=null && InodeUtils.isSet(htmlpage.getId()) && !htmlpage.getId().equals(contentlet.getIdentifier()) && htmlpage.getAssetType().equals("htmlpage") ){
-	        	        DotContentletValidationException cve = new FileAssetValidationException("Page URL already exists." + url);
+	        			DotContentletValidationException cve = new FileAssetValidationException("Page URL in contentlet [" + (contentlet != null ? contentlet.getIdentifier() : "Unknown/New") + "] already exists: " + url);
 	                    cve.addBadTypeField(st.getFieldVar(HTMLPageAssetAPI.URL_FIELD));
 	                    throw cve;
 	                }
 	            }else{
-	                DotContentletValidationException cve = new FileAssetValidationException("URL is required");
+	            	DotContentletValidationException cve = new FileAssetValidationException("Page URL in contentlet [" + (contentlet != null ? contentlet.getIdentifier() : "Unknown/New") + "] is required.");
 	                cve.addBadTypeField(st.getFieldVar(HTMLPageAssetAPI.URL_FIELD));
 	                throw cve;
 	            }
@@ -3912,24 +3909,17 @@ public class ESContentletAPIImpl implements ContentletAPI {
       
         	}
         	catch(DotDataException | DotSecurityException | IllegalArgumentException e){
-                DotContentletValidationException cve = new FileAssetValidationException(" URL is invalid");
+        		DotContentletValidationException cve = new FileAssetValidationException("URL in contentlet [" + (contentlet != null ? contentlet.getIdentifier() : "Unknown/New") + "] is invalid: " + contentlet.getStringProperty(HTMLPageAssetAPI.URL_FIELD));
                 cve.addBadTypeField(st.getFieldVar(HTMLPageAssetAPI.URL_FIELD));
                 throw cve;
         	}
         } 
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-
         boolean hasError = false;
-        DotContentletValidationException cve = new DotContentletValidationException("Contentlets' fields are not valid");
+        DotContentletValidationException cve =
+                new DotContentletValidationException("Contentlet ["
+                                + (contentlet != null && UtilMethods.isSet(contentlet.getIdentifier())
+                                                ? contentlet.getIdentifier() : "Unknown/New")
+                                + "] has invalid / missing field(s).");
         List<Field> fields = FieldsCache.getFieldsByStructureInode(stInode);
         Structure structure = CacheLocator.getContentTypeCache().getStructureByInode(stInode);
         Map<String, Object> conMap = contentlet.getMap();
@@ -3939,60 +3929,69 @@ public class ESContentletAPIImpl implements ContentletAPI {
                 if(isFieldTypeString(field)){
                     if(!(o instanceof String)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' text field must be of type String");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' text field must be of type String");
+                        hasError = true;
+                        continue;
                     }
                 }else if(isFieldTypeDate(field)){
                     if(!(o instanceof Date)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' date field must be of type Date");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' date field must be of type Date");
+                        hasError = true;
+                        continue;
                     }
                 }else if(isFieldTypeBoolean(field)){
                     if(!(o instanceof Boolean)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' bool field must be of type Boolean");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' bool field must be of type Boolean");
+                        hasError = true;
+                        continue;
                     }
                 }else if(isFieldTypeFloat(field)){
                     if(!(o instanceof Float)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' float field must be of type Float");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' float field must be of type Float");
                         hasError = true;
                         continue;
                     }
                 }else if(isFieldTypeLong(field)){
                     if(!(o instanceof Long || o instanceof Integer)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' integer field must be of type Long or Integer");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' integer field must be of type Long or Integer");
+                        hasError = true;
+                        continue;
                     }
-                    //  http://jira.dotmarketing.net/browse/DOTCMS-1073
-                    //  binary field validation
                 }else if(isFieldTypeBinary(field)){
                     if(!(o instanceof java.io.File)){
                         cve.addBadTypeField(field);
-                        Logger.error(this,"The '" + field.getVelocityVarName() + "' binary field field must be of type File");
+                        Logger.warn(this,"The '" + field.getVelocityVarName() + "' binary field field must be of type File");
+                        hasError = true;
+                        continue;
                     }
                 }else if(isFieldTypeSystem(field) || isFieldTypeConstant(field)){
-
+                	// Do not validate system or constant field values
                 }else{
-                    Logger.error(this,"Found an unknown field type : This should never happen!!!");
-                    throw new DotContentletStateException("Unknown field type");
+                	Logger.warn(this,"Found an unknown field type : This should never happen!!!");
+                    throw new DotContentletStateException("Field [" + field.getVelocityVarName() + "] has an unknown type");
                 }
             }
             if (field.isRequired()) {
                 if(o instanceof String){
                     String s1 = (String)o;
                     if(!UtilMethods.isSet(s1.trim()) || (field.getFieldType().equals(Field.FieldType.KEY_VALUE.toString())) && s1.equals("{}")) {
-                        cve.addRequiredField(field);
-                        Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                    	cve.addRequiredField(field);
                         hasError = true;
+                        Logger.warn(this, "String Field [" + field.getVelocityVarName() + "] is required");
                         continue;
                     }
                 }
                 else if(o instanceof java.io.File){
                     String s1 = ((java.io.File) o).getPath();
                    	if(!UtilMethods.isSet(s1.trim())||s1.trim().contains("-removed-")) {
-                           cve.addRequiredField(field);
-                           hasError = true;
-                           continue;
+                   		cve.addRequiredField(field);
+                        hasError = true;
+                        Logger.warn(this, "File Field [" + field.getVelocityVarName() + "] is required");
+                        continue;
                     }
                 }
                 else if(field.getFieldType().equals(Field.FieldType.DATE_TIME.toString())){
@@ -4000,30 +3999,33 @@ public class ESContentletAPIImpl implements ContentletAPI {
                 		 if(structure.getExpireDateVar() != null){
                 			if(field.getVelocityVarName().equals(structure.getExpireDateVar())){
 	                			if(conMap.get("NeverExpire").equals("NeverExpire")){
-                				  continue;
+	                				continue;
 	                			}else{
-	                			  cve.addRequiredField(field);
-	                              hasError = true;
-	                              continue;
+	                				cve.addRequiredField(field);
+                                    hasError = true;
+                                    Logger.warn(this, "Date/Time in CT Field [" + field.getVelocityVarName() + "] is" +
+                                            " required");
+                                    continue;
 	                		    }
 	                		}else{
-                			  cve.addRequiredField(field);
-                              hasError = true;
-                              continue;
+	                			cve.addRequiredField(field);
+                                hasError = true;
+                                Logger.warn(this, "Date/Time expire Field [" + field.getVelocityVarName() + "] is required");
+                                continue;
 	                	    }
                 		 }else{
-            			   cve.addRequiredField(field);
-            			   Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
-                           hasError = true;
-                           continue;
+                			 cve.addRequiredField(field);
+                             hasError = true;
+                             Logger.warn(this, "Date/Time Field [" + field.getVelocityVarName() + "] is required");
+                             continue;
 	                	}
                 	}
                 }
                 else if( field.getFieldType().equals(Field.FieldType.CATEGORY.toString()) ) {
                     if( cats == null || cats.size() == 0 ) {
-                        cve.addRequiredField(field);
-                        Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                    	cve.addRequiredField(field);
                         hasError = true;
+                        Logger.warn(this, "Category Field [" + field.getVelocityVarName() + "] is required (empty)");
                         continue;
                     }
                     try {
@@ -4042,9 +4044,9 @@ public class ESContentletAPIImpl implements ContentletAPI {
                                 }
                             }
                             if(!found) {
-                                cve.addRequiredField(field);
-                                Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                            	cve.addRequiredField(field);
                                 hasError = true;
+                                Logger.warn(this, "Category Field [" + field.getVelocityVarName() + "] is required (values not found)");
                                 continue;
                             }
                         }
@@ -4055,32 +4057,32 @@ public class ESContentletAPIImpl implements ContentletAPI {
                     }
                 } else if (field.getFieldType().equals(Field.FieldType.HOST_OR_FOLDER.toString())) {
                     if (!UtilMethods.isSet(contentlet.getHost()) && !UtilMethods.isSet(contentlet.getFolder())) {
-                        cve.addRequiredField(field);
-                        Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                    	cve.addRequiredField(field);
                         hasError = true;
+                        Logger.warn(this, "Site or Folder Field [" + field.getVelocityVarName() + "] is required");
                         continue;
                     }
                 } else if(!UtilMethods.isSet(o)) {
-                    cve.addRequiredField(field);
-                    Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                	cve.addRequiredField(field);
                     hasError = true;
+                    Logger.warn(this, "Field [" + field.getVelocityVarName() + "] is required");
                     continue;
                 }
                 if(field.getFieldType().equals(Field.FieldType.IMAGE.toString()) || field.getFieldType().equals(Field.FieldType.FILE.toString())){
                     if(o instanceof Number){
                         Number n = (Number)o;
                         if(n.longValue() == 0){
-                            cve.addRequiredField(field);
-                            Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                        	cve.addRequiredField(field);
                             hasError = true;
+                            Logger.warn(this, "Image Field (as number) [" + field.getVelocityVarName() + "] is required");
                             continue;
                         }
                     }else if(o instanceof String){
                         String s = (String)o;
                         if(s.trim().equals("0")){
-                            cve.addRequiredField(field);
-                            Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                        	cve.addRequiredField(field);
                             hasError = true;
+                            Logger.warn(this, "Image Field (as String) [" + field.getVelocityVarName() + "] is required");
                             continue;
                         }
                     }
@@ -4089,9 +4091,9 @@ public class ESContentletAPIImpl implements ContentletAPI {
                     if(o instanceof String){
                         String s = (String)o;
                         if (s.trim().toLowerCase().equals("<br>")){
-                            cve.addRequiredField(field);
-                            Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field is required.");
+                        	cve.addRequiredField(field);
                             hasError = true;
+                            Logger.warn(this, "WYSIWYG Field [" + field.getVelocityVarName() + "] is required");
                             continue;
                         }
                     }
@@ -4113,9 +4115,9 @@ public class ESContentletAPIImpl implements ContentletAPI {
                 try {
                     contentlets = searchIndex(buffy.toString(), -1, 0, "inode", APILocator.getUserAPI().getSystemUser(), false);
                 } catch (Exception e) {
-                    Logger.error(this, e.getMessage(),e);
-                    Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field must be unique.");
-                    throw new DotContentletValidationException(e.getMessage(),e);
+                	final String errorMsg = "Unique field [" + field.getVelocityVarName() + "] could not be validated: " + e.getMessage();
+                    Logger.warn(this, errorMsg, e);
+                    throw new DotContentletValidationException(errorMsg, e);
                 }
                 int size = contentlets.size();
                 if(size > 0 && !hasError){
@@ -4140,26 +4142,26 @@ public class ESContentletAPIImpl implements ContentletAPI {
 	                            ContentletSearch cont = (ContentletSearch) contentletsIter.next();
 	                                if(!contentlet.getIdentifier().equalsIgnoreCase(cont.getIdentifier()))
 	                                {
-	                                    cve.addUniqueField(field);
-	                                    Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field must be unique.");
-	                                    hasError = true;
-	                                    break;
+	                                	cve.addUniqueField(field);
+                                        hasError = true;
+                                        Logger.warn(this, "Field [" + field.getVelocityVarName() + "] must be unique");
+                                        break;
 	                                }
 
 	                        }
 	                    }else{
-	                        cve.addUniqueField(field);
-	                        Logger.error(this,"The value of the '" + field.getVelocityVarName() + "' field must be unique.");
-	                        hasError = true;
-	                        break;
+	                    	cve.addUniqueField(field);
+                            hasError = true;
+                            Logger.warn(this, "Field [" + field.getVelocityVarName() + "] must be unique");
+                            break;
 	                    }
 					}
                 }
 
             	} catch (DotDataException e) {
-					Logger.error(this,"Unable to get contentlets for structure: " + contentlet.getStructure().getName() ,e);
+            		Logger.warn(this,"Unable to get contentlets for Content Type: " + contentlet.getStructure().getName(), e);
 				} catch (DotSecurityException e) {
-					Logger.error(this,"Unable to get contentlets for structure: " + contentlet.getStructure().getName() ,e);
+					Logger.warn(this,"Unable to get contentlets for Content Type: " + contentlet.getStructure().getName(), e);
 				}
             }
             String dataType = (field.getFieldContentlet() != null) ? field.getFieldContentlet().replaceAll("[0-9]*", "") : "";
@@ -4168,14 +4170,14 @@ public class ESContentletAPIImpl implements ContentletAPI {
                 try{
                     s = (String)o;
                 }catch (Exception e) {
-					Logger.error(this,
+					Logger.warn(this,
 							"The value of the '" + field.getVelocityVarName() + "' field could not be casted to text.",
 							e);
                     continue;
                 }
                 if (s.length() > 255) {
                     hasError = true;
-                    Logger.error(this,
+                    Logger.warn(this,
 							"The value of the '" + field.getVelocityVarName() + "' field cannot be longer than 255 characters.");
                     cve.addMaxLengthField(field);
                     continue;
@@ -4189,7 +4191,7 @@ public class ESContentletAPIImpl implements ContentletAPI {
                         String s = n.toString();
                         boolean match = Pattern.matches(regext, s);
                         if (!match) {
-							Logger.error(this, "The value of the '" + field.getVelocityVarName() + "' field does not match the specified RegEx.");
+							Logger.warn(this, "The value of the '" + field.getVelocityVarName() + "' field does not match the specified RegEx.");
                             hasError = true;
                             cve.addPatternField(field);
                             continue;
@@ -4198,7 +4200,7 @@ public class ESContentletAPIImpl implements ContentletAPI {
                         String s = ((String)o).trim();
                         boolean match = Pattern.matches(regext, s);
                         if (!match) {
-                        	Logger.error(this, "The value of the '" + field.getVelocityVarName() + "' field does not match the specified RegEx.");
+                        	Logger.warn(this, "The value of the '" + field.getVelocityVarName() + "' field does not match the specified RegEx.");
                             hasError = true;
                             cve.addPatternField(field);
                             continue;

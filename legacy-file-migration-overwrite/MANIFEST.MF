@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Plugin-Name: legacy-file-migration-overwrite
+Plugin-Version: 1.0
+Author: dotCMS

@@ -103,8 +103,6 @@ public class LegacyFilesMigrator {
 				" \n \n" + "=======================================================================\n"
 						+ "===== Initializing conversion of Legacy Files to Files as Content =====\n"
 						+ "=======================================================================\n");
-		Logger.info(this.getClass(),
-				"NOTE: Files as Contents CANNOT LIVE UNDER SYSTEM_HOST anymore. Therefore, such Legacy Files will be automatically deleted.");
 		try {
 			migratorDAO.recreateMissingParentPaths();
 			SYSTEM_USER = userAPI.getSystemUser();
@@ -145,7 +143,15 @@ public class LegacyFilesMigrator {
 									String.format("An error occurred when migrating file with Identifier: '%s'",
 											legacyFile.getIdentifier()),
 									e);
-							migratorDAO.updateLegacyFileRecord(legacyFile, MigrationStatus.ERROR, e);
+							try {
+								migratorDAO.updateLegacyFileRecord(legacyFile, MigrationStatus.ERROR, e);
+							} catch (final Exception e2) {
+								Logger.warn(this,
+										"An error occurred with the DB transaction when migrating Legacy file ID: "
+												+ legacyFile.getIdentifier()
+												+ ". Forcing the creation of a new transaction to continue with the migration process...");
+								startBatchTransaction = Boolean.TRUE;
+							}
 						} finally {
 							if (counter == legacyFiles.size()
 									|| (counter > 0 && counter % pluginConfig.getLoggingFrequency() == 0)) {
@@ -219,6 +225,11 @@ public class LegacyFilesMigrator {
 	public boolean migrateLegacyFile(final LegacyFile legacyFile) throws Exception {
 		// Retrieve Identifier object of the legacy file
 		final Identifier legacyIdentifier = identifierAPI.find(legacyFile.getIdentifier());
+		if (null == legacyIdentifier || !UtilMethods.isSet(legacyIdentifier.getId())) {
+			Logger.warn(this, String.format("Legacy File with ID (%s) is not present in the Identifier table anymore.",
+					legacyFile.getIdentifier()));
+			return Boolean.FALSE;
+		}
 		final Savepoint savepoint = HibernateUtil.setSavepoint();
 		try {
 			if (!isValidLegacyFile(legacyIdentifier)) {
@@ -240,6 +251,10 @@ public class LegacyFilesMigrator {
 				// Legacy File
 				fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
 				if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
+					Logger.warn(this, String.format(
+							"Legacy File '%s%s' (%s) is not associated to a valid binary file. Deleting file...",
+							legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(),
+							legacyIdentifier.getId()));
 					// The binary file doesn't exist, delete the Legacy File altogether
 					deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
 					return Boolean.FALSE;
@@ -251,6 +266,10 @@ public class LegacyFilesMigrator {
 						!RESPECT_ANON_PERMISSIONS);
 				fileAsContent = copyLegacyFileToContentlet(legacyFileFromDb, legacyIdentifier);
 				if (!MigratorUtils.isBinaryFilePresent(fileAsContent)) {
+					Logger.warn(this, String.format(
+							"Legacy File '%s%s' (%s) is not associated to a valid binary file. Deleting file...",
+							legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(),
+							legacyIdentifier.getId()));
 					// The binary file doesn't exist, delete the Legacy File altogether
 					deleteLegacyFile(legacyFileFromDb, legacyIdentifier);
 					return Boolean.FALSE;
@@ -322,7 +341,16 @@ public class LegacyFilesMigrator {
 	/**
 	 * Performs a series of validations on the Legacy File in order to determine if
 	 * it's worth it to migrate it or not. Usually, a file that has been flagged as
-	 * "invalid" will be deleted altogether.
+	 * "invalid" will be deleted altogether. There are different situations that can
+	 * flag a Legacy File as invalid:
+	 * <ul>
+	 * <li>The file lives under SYSTEM_HOST.</li>
+	 * <li>The file has an invalid asset name.</li>
+	 * <li>The file lives under an invalid Site or a content that is NOT a
+	 * Site.</li>
+	 * <li>One or more of the folders that make up the parent path of the file are
+	 * missing.</li>
+	 * <ul>
 	 * 
 	 * @param legacyIdentifier
 	 *            - The {@link Identifier} of the Legacy File Asset.
@@ -343,6 +371,12 @@ public class LegacyFilesMigrator {
 					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId()));
 			return Boolean.FALSE;
 		}
+		// If the file name is "."
+		if (".".equals(legacyIdentifier.getAssetName())) {
+			Logger.warn(this, String.format("Legacy File '%s%s' (%s) has an invalid name. Deleting file...",
+					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId()));
+			return Boolean.FALSE;
+		}
 		// If the Site containing the file is not a valid Site
 		final Host parentSite = hostAPI.find(legacyIdentifier.getHostId(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
 		if (null == parentSite || !UtilMethods.isSet(parentSite.getIdentifier())) {
@@ -352,10 +386,14 @@ public class LegacyFilesMigrator {
 					legacyIdentifier.getHostId()));
 			return Boolean.FALSE;
 		}
-		// If the file name is "."
-		if (".".equals(legacyIdentifier.getAssetName())) {
-			Logger.warn(this, String.format("Legacy File '%s%s' (%s) has an invalid name. Deleting file...",
-					legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(), legacyIdentifier.getId()));
+		// If the parent folder is not valid, i.e., any of the folders in the path is missing
+		final Folder parentFolder = folderAPI.findFolderByPath(legacyIdentifier.getParentPath(),
+				legacyIdentifier.getHostId(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
+		if (null == parentFolder || !UtilMethods.isSet(parentFolder.getInode())) {
+			Logger.warn(this,
+					String.format("One or more folders in path '%s' for file '%s' (%s) is missing. Deleting file...",
+							legacyIdentifier.getParentPath(), legacyIdentifier.getAssetName(),
+							legacyIdentifier.getId()));
 			return Boolean.FALSE;
 		}
 		return Boolean.TRUE;
@@ -436,12 +474,7 @@ public class LegacyFilesMigrator {
 		fileAsContent.setHost(legacyIdentifier.getHostId());
 		final Folder parentFolder = folderAPI.findFolderByPath(legacyIdentifier.getParentPath(),
 				legacyIdentifier.getHostId(), SYSTEM_USER, !RESPECT_FRONTEND_ROLES);
-		if (null != parentFolder && UtilMethods.isSet(parentFolder.getInode())) {
-			fileAsContent.setFolder(parentFolder.getInode());
-		} else {
-			throw new Exception(String.format("Parent path '%s' for file '%s' (%s) was not found.",
-					legacyIdentifier.getParentPath(), file.getFileName(), legacyIdentifier.getId()));
-		}
+		fileAsContent.setFolder(parentFolder.getInode());
 		fileAsContent.setBinary("fileAsset", MigratorUtils.getBinaryFileFromLegacyFile(file));
 		return fileAsContent;
 	}

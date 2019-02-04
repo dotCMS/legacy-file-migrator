@@ -15,7 +15,7 @@ repositories {
 
 dependencies {
 	compile fileTree(dir: 'src/main/resources/libs', include: '*.jar')
-	compile (group: 'com.dotcms', name: 'dotcms', version: '3.7.1'){
+	compile (group: 'com.dotcms', name: 'dotcms', version: '3.7.2'){
 		transitive = true
 	}
 	providedCompile "javax.servlet:servlet-api:2.5"
@@ -25,10 +25,9 @@ jar {
     manifest {
         name = 'Osgi Override class'
         instruction 'Bundle-Vendor', 'dotcms'
-        instruction 'Bundle-Description', 'dotCMS OSGi Plugin for Migrating Legacy Files - dotCMS 3.7.1'
+        instruction 'Bundle-Description', 'dotCMS OSGi Plugin for Migrating Legacy Files - dotCMS 3.7.2'
         instruction 'Bundle-DocURL', 'http://www.dotcms.com'
         instruction 'Bundle-Activator', 'com.dotmarketing.osgi.override.Activator'
-        instruction 'Override-Classes', 'com.dotmarketing.portlets.folders.business.FolderAPIImpl,com.dotcms.content.elasticsearch.business.ESContentletAPIImpl'
         instruction 'DynamicImport-Package', '*'
         instruction 'Import-Package', '*;version=0'
     }
