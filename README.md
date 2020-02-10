@@ -1,5 +1,7 @@
 # Legacy File Migrator for dotCMS 3.7.2
 
+** This version of gradle may not be compatible with the latest JDK, FYSA. 
+
 This OSGi plugin is in charge of migrating the deprecated Legacy Files to the new Files as Content. This migration is required for all customers needing to upgrade their environments from dotCMS 3.x to dotCMS 4.x and above as Legacy Files will not be handled at all by our code base anymore.
 
 * [How to Build the Dynamic Plugin (Legacy File Migrator)](#build-dp)
