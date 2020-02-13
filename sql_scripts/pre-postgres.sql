@@ -19,9 +19,14 @@ CREATE INDEX IDX_file_migration_2 ON file_migration (server_id);
 --
 ALTER TABLE file_asset DROP CONSTRAINT fk7ed2366d5fb51eb;
 ALTER TABLE file_asset DROP CONSTRAINT file_identifier_fk;
-ALTER TABLE fileasset_version_info DROP CONSTRAINT fk_fileasset_ver_info_ident;
-ALTER TABLE fileasset_version_info DROP CONSTRAINT fk_fileasset_ver_info_live;
-ALTER TABLE fileasset_version_info DROP CONSTRAINT fk_fileasset_ver_info_working;
+
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_ver_info_working;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_version_info_working;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_ver_info_live;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_version_info_live;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_ver_info_working;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_version_info_working;
+
 
 -- Get all Legacy Files in the system
 INSERT INTO file_migration(identifier) 
