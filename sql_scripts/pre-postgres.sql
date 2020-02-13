@@ -11,6 +11,12 @@ CREATE INDEX IDX_file_migration_1 ON file_migration (identifier);
 CREATE INDEX IDX_file_migration_2 ON file_migration (server_id);
 
 -- Drop file_asset constraints
+--
+-- IMPORTANT: IN SOME DATASETS FROM CUSTOMERS, THE NAME OF THESE SPECIFIC CONSTRAINTS WAS CHANGED 
+-- AT SOME POINT. FOR EXAMPLE, "fk_fileasset_ver_info_ident" IS CALLED "fk_fileasset_version_info_ident" 
+-- IN THEIR DATABASE, AND SO ON. IF THAT'S THE CASE, THESE QUERIES NEED TO BE ADJUSTED TO REFLECT 
+-- THIS NEW NAME SO THAT THE PLUGIN WORKS AS EXPECTED.
+--
 ALTER TABLE file_asset DROP CONSTRAINT fk7ed2366d5fb51eb;
 ALTER TABLE file_asset DROP CONSTRAINT file_identifier_fk;
 ALTER TABLE fileasset_version_info DROP CONSTRAINT fk_fileasset_ver_info_ident;
