@@ -27,6 +27,7 @@ ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileas
 ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_ver_info_working;
 ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_version_info_working;
 ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_version_info_identifier;
+ALTER TABLE IF EXISTS fileasset_version_info DROP CONSTRAINT IF EXISTS fk_fileasset_ver_info_ident;
 
 -- Get all Legacy Files in the system
 INSERT INTO file_migration(identifier) 
